@@ -11,7 +11,9 @@ except ImportError:
     input('Press Enter to quit...')
 
 FRAME_LEN = 1024
+N_HARMONICS = 12
 STUPID_MATCH = True
+USE_HANN = True
 
 SR = 44100
 DTYPE = (np.float32, pyaudio.paFloat32)
@@ -39,7 +41,6 @@ class Synth:
 
     def eat(self, harmonics):
         if STUPID_MATCH:
-            harmonics.sort(self.getMag)
             [osc.eat(h) for osc, h in zip(self.osc, harmonics)]
 
 class Osc():
@@ -76,15 +77,18 @@ def sft(signal, freq_bin):
 def refineGuess(guess, signal):
     def loss(x):
         return - sft(signal, x)
-    return blindDescend(loss, .01, .4, guess)
+    x, y = blindDescend(loss, .01, .4, guess)
+    return x, - y
 
 streamOutContainer = []
 terminate_flag = 0
 terminateLock = Lock()
+synth = None
 
 def main():
-    global terminate_flag
+    global terminate_flag, synth
     terminateLock.acquire()
+    synth = Synth()
     pa = pyaudio.PyAudio()
     streamOutContainer.append(pa.open(
         format = DTYPE[1], channels = 1, rate = SR, 
@@ -133,8 +137,14 @@ def onAudioIn(in_data, sample_count, *_):
         frame = np.frombuffer(
             in_data, dtype = DTYPE[0]
         )
+        if USE_HANN:
+            frame *= HANN
+        energy = np.abs(rfft(frame))
+        peak_bins = findPeaks(energy)[:N_HARMONICS]
+        hamonics = [Harmonic(*refineGuess(x, frame)) for x in peak_bins]
+        synth.eat(hamonics)
 
-        streamOutContainer[0].write(frame_out, FRAME_LEN)
+        streamOutContainer[0].write(synth.mix(), FRAME_LEN)
         return (None, pyaudio.paContinue)
     except:
         terminateLock.release()
