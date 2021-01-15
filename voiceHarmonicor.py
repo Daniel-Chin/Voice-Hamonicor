@@ -1,8 +1,12 @@
+print('importing...')
+import pyaudio
 import numpy as np
 from numpy.fft import rfft
 import scipy.signal
-from collections import namedtuple
 from time import sleep
+from threading import Lock
+import wave
+from harmonicSynth import Synth, Harmonic
 try:
     from blindDescend import blindDescend
 except ImportError:
@@ -10,65 +14,32 @@ except ImportError:
     print('https://github.com/Daniel-Chin/Python_Lib/blob/master/blindDescend.py')
     input('Press Enter to quit...')
 
-FRAME_LEN = 1024
-N_HARMONICS = 12
-STUPID_MATCH = True
+FRAME_LEN = 512
+# FRAME_LEN = 1024
+N_HARMONICS = 5
+STUPID_MATCH = False
 USE_HANN = True
+AUTOTUNE = True
+DO_SWIPE = True
+CROSSFADE_LEN = .02
+WRITE_FILE = None
+# import random
+# WRITE_FILE = f'out_{random.randint(0, 999)}.wav'
 
-SR = 44100
-DTYPE = (np.float32, pyaudio.paFloat32)
+SR = 22050
+DTYPE = (np.int16, pyaudio.paInt16)
+DTYPE = (np.int32, pyaudio.paInt32)
+# DTYPE = (np.float32, pyaudio.paFloat32)
 TWO_PI = np.pi * 2
-IMAGINARY_LADDER = np.linspace(0, TWO_PI * j, FRAME_LEN)
+IMAGINARY_LADDER = np.linspace(0, TWO_PI * 1j, FRAME_LEN)
 HANN = scipy.signal.get_window('hann', FRAME_LEN, True)
-
-Harmonic = namedtuple('Harmonic', ['freq', 'mag'])
-
-class Synth:
-    def __init__(self, n_harmonics):
-        self.signal_2d = np.zeros((n_harmonics, FRAME_LEN), DTYPE[0])
-        self.harmonics = [
-            Harmonic(261.63, 0) for i in range(n_harmonics)
-        ]
-        self.osc = [Osc(
-            i, self.signal_2d, h
-        ) for i, h in enumerate(self.harmonics)]
-    
-    def mix(self):
-        return np.sum(self.signal_2d, 0)
-    
-    def getMag(self, harmonic):
-        return harmonic.mag
-
-    def eat(self, harmonics):
-        if STUPID_MATCH:
-            [osc.eat(h) for osc, h in zip(self.osc, harmonics)]
-
-class Osc():
-    def __init__(self, i, signal_2d, harmonic):
-        self.LINEAR = np.arange(FRAME_LEN + 1) * TWO_PI
-        self.freq = harmonic.freq
-        self.mag = harmonic.mag
-        self.phase = 0
-        self.i = i
-        self.signal_2d = signal_2d
-    
-    def eat(self, new_freq, new_mag, swipe = True):
-        if swipe:
-            tau = self.LINEAR * np.linspace(self.freq, new_freq, FRAME_LEN + 1)
-        else:
-            tau = self.LINEAR * new_freq
-        self.signal_2d[self.i] = np.sin(
-            tau[:-1] + self.phase
-        ) * np.linspace(self.mag, new_mag, FRAME_LEN)
-        self.freq = new_freq
-        self.mag = new_mag
-        self.phase = (tau[-1] + self.phase) % TWO_PI
 
 def findPeaks(energy):
     slope = np.sign(energy[1:] - energy[:-1])
     extrema = slope[1:] - slope[:-1]
-    energy = energy[1:-1]
-    return reversed(np.argsort(energy[extrema == -2]) + 1)
+    return np.argpartition(
+        (extrema == -2) * energy[1:-1], - N_HARMONICS,
+    )[- N_HARMONICS:] + 1
 
 def sft(signal, freq_bin):
     # Slow Fourier Transform
@@ -76,9 +47,11 @@ def sft(signal, freq_bin):
 
 def refineGuess(guess, signal):
     def loss(x):
+        if x < 0:
+            return 0
         return - sft(signal, x)
-    x, y = blindDescend(loss, .01, .4, guess)
-    return x, - y
+    freq_bin, loss = blindDescend(loss, .01, .4, guess)
+    return freq_bin * SR / FRAME_LEN, - loss
 
 streamOutContainer = []
 terminate_flag = 0
@@ -86,14 +59,24 @@ terminateLock = Lock()
 synth = None
 
 def main():
-    global terminate_flag, synth
+    global terminate_flag, synth, f
+    print('main')
     terminateLock.acquire()
-    synth = Synth()
+    synth = Synth(
+        N_HARMONICS, SR, FRAME_LEN, DTYPE[0], STUPID_MATCH, 
+        DO_SWIPE, CROSSFADE_LEN, 
+    )
     pa = pyaudio.PyAudio()
-    streamOutContainer.append(pa.open(
-        format = DTYPE[1], channels = 1, rate = SR, 
-        output = True, frames_per_buffer = FRAME_LEN,
-    ))
+    if WRITE_FILE is None:
+        streamOutContainer.append(pa.open(
+            format = DTYPE[1], channels = 1, rate = SR, 
+            output = True, frames_per_buffer = FRAME_LEN,
+        ))
+    else:
+        f = wave.open(WRITE_FILE, 'wb')
+        f.setnchannels(1)
+        f.setsampwidth(4)
+        f.setframerate(SR)
     streamIn = pa.open(
         format = DTYPE[1], channels = 1, rate = SR, 
         input = True, frames_per_buffer = FRAME_LEN,
@@ -110,8 +93,11 @@ def main():
         terminate_flag = 1
         terminateLock.acquire()
         terminateLock.release()
-        streamOutContainer[0].stop_stream()
-        streamOutContainer[0].close()
+        if WRITE_FILE is None:
+            streamOutContainer[0].stop_stream()
+            streamOutContainer[0].close()
+        else:
+            f.close()
         while streamIn.is_active():
             sleep(.1)   # not perfect
         streamIn.stop_stream()
@@ -134,22 +120,37 @@ def onAudioIn(in_data, sample_count, *_):
             print('Discarding audio frame!')
             in_data = in_data[-FRAME_LEN:]
 
-        frame = np.frombuffer(
+        raw_frame = np.frombuffer(
             in_data, dtype = DTYPE[0]
         )
         if USE_HANN:
-            frame *= HANN
+            frame = HANN * raw_frame
+        else:
+            frame = raw_frame
         energy = np.abs(rfft(frame))
-        peak_bins = findPeaks(energy)[:N_HARMONICS]
-        hamonics = [Harmonic(*refineGuess(x, frame)) for x in peak_bins]
-        synth.eat(hamonics)
+        harmonics = [
+            Harmonic(*autotune(*refineGuess(x, frame))) for x, _ in 
+            zip(findPeaks(energy), range(N_HARMONICS))
+        ]
+        synth.eat(harmonics)
 
-        streamOutContainer[0].write(synth.mix(), FRAME_LEN)
+        mixed = synth.mix()
+        if WRITE_FILE is None:
+            streamOutContainer[0].write(mixed, FRAME_LEN)
+        else:
+            f.writeframes(mixed)
+
         return (None, pyaudio.paContinue)
     except:
         terminateLock.release()
         import traceback
         traceback.print_exc()
         return (None, pyaudio.paAbort)
+
+def autotune(freq, mag):
+    if not AUTOTUNE:
+        return freq, mag
+    pitch = np.log(freq) * 17.312340490667562 - 36.37631656229591
+    return np.exp((round(pitch) + 36.37631656229591) * 0.05776226504666211), mag
 
 main()
