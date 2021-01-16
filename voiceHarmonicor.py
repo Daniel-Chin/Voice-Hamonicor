@@ -19,8 +19,8 @@ except ImportError:
     print('https://github.com/Daniel-Chin/Python_Lib/blob/master/blindDescend.py')
     input('Press Enter to quit...')
 
-FRAME_LEN = 512
-# FRAME_LEN = 1024
+PAGE_LEN = 512
+# PAGE_LEN = 1024
 # N_HARMONICS = 17
 N_HARMONICS = 5
 STUPID_MATCH = False
@@ -37,8 +37,8 @@ DTYPE = (np.int16, pyaudio.paInt16)
 DTYPE = (np.int32, pyaudio.paInt32)
 # DTYPE = (np.float32, pyaudio.paFloat32)
 TWO_PI = np.pi * 2
-IMAGINARY_LADDER = np.linspace(0, TWO_PI * 1j, FRAME_LEN)
-HANN = scipy.signal.get_window('hann', FRAME_LEN, True)
+IMAGINARY_LADDER = np.linspace(0, TWO_PI * 1j, PAGE_LEN)
+HANN = scipy.signal.get_window('hann', PAGE_LEN, True)
 
 def findPeaks(energy):
     slope = np.sign(energy[1:] - energy[:-1])
@@ -49,7 +49,7 @@ def findPeaks(energy):
 
 def sft(signal, freq_bin):
     # Slow Fourier Transform
-    return np.abs(np.sum(signal * np.exp(IMAGINARY_LADDER * freq_bin))) / FRAME_LEN
+    return np.abs(np.sum(signal * np.exp(IMAGINARY_LADDER * freq_bin))) / PAGE_LEN
 
 def refineGuess(guess, signal):
     def loss(x):
@@ -57,7 +57,7 @@ def refineGuess(guess, signal):
             return 0
         return - sft(signal, x)
     freq_bin, loss = blindDescend(loss, .01, .4, guess)
-    return freq_bin * SR / FRAME_LEN, - loss
+    return freq_bin * SR / PAGE_LEN, - loss
 
 streamOutContainer = []
 terminate_flag = 0
@@ -69,14 +69,14 @@ def main():
     print('main')
     terminateLock.acquire()
     synth = HarmonicSynth(
-        N_HARMONICS, SR, FRAME_LEN, DTYPE[0], STUPID_MATCH, 
+        N_HARMONICS, SR, PAGE_LEN, DTYPE[0], STUPID_MATCH, 
         DO_SWIPE, CROSSFADE_LEN, 
     )
     pa = pyaudio.PyAudio()
     if WRITE_FILE is None:
         streamOutContainer.append(pa.open(
             format = DTYPE[1], channels = 1, rate = SR, 
-            output = True, frames_per_buffer = FRAME_LEN,
+            output = True, frames_per_buffer = PAGE_LEN,
         ))
     else:
         f = wave.open(WRITE_FILE, 'wb')
@@ -85,7 +85,7 @@ def main():
         f.setframerate(SR)
     streamIn = pa.open(
         format = DTYPE[1], channels = 1, rate = SR, 
-        input = True, frames_per_buffer = FRAME_LEN,
+        input = True, frames_per_buffer = PAGE_LEN,
         stream_callback = onAudioIn, 
     )
     streamIn.start_stream()
@@ -122,9 +122,9 @@ def onAudioIn(in_data, sample_count, *_):
             # Sadly, there is no way to notify main thread after returning. 
             return (None, pyaudio.paComplete)
 
-        if sample_count > FRAME_LEN:
+        if sample_count > PAGE_LEN:
             print('Discarding audio frame!')
-            in_data = in_data[-FRAME_LEN:]
+            in_data = in_data[-PAGE_LEN:]
 
         raw_frame = np.frombuffer(
             in_data, dtype = DTYPE[0]
@@ -142,7 +142,7 @@ def onAudioIn(in_data, sample_count, *_):
 
         mixed = synth.mix()
         if WRITE_FILE is None:
-            streamOutContainer[0].write(mixed, FRAME_LEN)
+            streamOutContainer[0].write(mixed, PAGE_LEN)
         else:
             f.writeframes(mixed)
 
