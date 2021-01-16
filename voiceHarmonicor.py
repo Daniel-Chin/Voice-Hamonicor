@@ -19,9 +19,8 @@ except ImportError as e:
 
 PAGE_LEN = 512
 # PAGE_LEN = 1024
-# N_HARMONICS = 17
-N_HARMONICS = 5
-STUPID_MATCH = False
+N_HARMONICS = 60
+STUPID_MATCH = True
 USE_HANN = True
 AUTOTUNE = True
 DO_SWIPE = False
@@ -30,7 +29,7 @@ STRICT_HARMO = True
 
 WRITE_FILE = None
 # import random
-# WRITE_FILE = f'out_{random.randint(0, 999)}.wav'
+# WRITE_FILE = f'demo.wav'
 
 SR = 22050
 DTYPE = (np.int16, pyaudio.paInt16)
@@ -134,14 +133,19 @@ def onAudioIn(in_data, sample_count, *_):
         else:
             page = raw_page
         
-        # if STRICT_HARMO:
-        #     yin()
-        # else:
-        energy = np.abs(rfft(page))
-        harmonics = [
-            Harmonic(*autotune(*refineGuess(x, page))) for x, _ in 
-            zip(findPeaks(energy), range(N_HARMONICS))
-        ]
+        if STRICT_HARMO:
+            f0 = yin(page, SR, PAGE_LEN)
+            f0_ = autotune(f0, 0)[0]
+            harmonics = [
+                Harmonic(f0_ * i, sft(page, f0 * i * PAGE_LEN / SR)) 
+                for i in range(1, 1 + N_HARMONICS)
+            ]
+        else:
+            energy = np.abs(rfft(page))
+            harmonics = [
+                Harmonic(*autotune(*refineGuess(x, page))) for x, _ in 
+                zip(findPeaks(energy), range(N_HARMONICS))
+            ]
         synth.eat(harmonics)
 
         mixed = synth.mix()
