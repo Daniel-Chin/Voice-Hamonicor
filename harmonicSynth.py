@@ -72,7 +72,7 @@ class Osc():
         if swipe:
             # print('swipe', end='')
             tau = self.LINEAR * np.linspace(
-                self.freq, new_freq, self.synth.FRAME_LEN + 1
+                self.freq, (new_freq + self.freq) * .5, self.synth.FRAME_LEN + 1
             )
             mask = np.linspace(self.mag, new_mag, self.synth.FRAME_LEN)
         else:
