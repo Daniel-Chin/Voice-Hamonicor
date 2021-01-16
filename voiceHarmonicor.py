@@ -6,7 +6,12 @@ import scipy.signal
 from time import sleep
 from threading import Lock
 import wave
-from harmonicSynth import Synth, Harmonic
+try:
+    from harmonicSynth import HarmonicSynth, Harmonic
+except ImportError:
+    print('Missing module "harmonicSynth". Please download at')
+    print('https://github.com/Daniel-Chin/Python_Lib/blob/master/harmonicSynth.py')
+    input('Press Enter to quit...')
 try:
     from blindDescend import blindDescend
 except ImportError:
@@ -16,12 +21,13 @@ except ImportError:
 
 FRAME_LEN = 512
 # FRAME_LEN = 1024
+# N_HARMONICS = 17
 N_HARMONICS = 5
 STUPID_MATCH = False
 USE_HANN = True
 AUTOTUNE = True
-DO_SWIPE = True
-CROSSFADE_LEN = .02
+DO_SWIPE = False
+CROSSFADE_LEN = .3
 WRITE_FILE = None
 # import random
 # WRITE_FILE = f'out_{random.randint(0, 999)}.wav'
@@ -62,7 +68,7 @@ def main():
     global terminate_flag, synth, f
     print('main')
     terminateLock.acquire()
-    synth = Synth(
+    synth = HarmonicSynth(
         N_HARMONICS, SR, FRAME_LEN, DTYPE[0], STUPID_MATCH, 
         DO_SWIPE, CROSSFADE_LEN, 
     )

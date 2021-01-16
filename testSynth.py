@@ -1,6 +1,6 @@
 import pyaudio
 import numpy as np
-from harmonicSynth import Synth, Harmonic, TWO_PI
+from harmonicSynth import HarmonicSynth, Harmonic, TWO_PI
 from threading import Thread
 from time import sleep
 
@@ -21,7 +21,7 @@ def onAudioOut(_, sample_count, *__):
 
 def main():
     global s, hs
-    s = Synth(1, SR, FRAME_LEN, DTYPE[0], True, True, .02)
+    s = HarmonicSynth(1, SR, FRAME_LEN, DTYPE[0], True, True, .02)
     hs = [Harmonic(220, 1) for _ in range(1)]
     pa = pyaudio.PyAudio()
     stream = pa.open(
