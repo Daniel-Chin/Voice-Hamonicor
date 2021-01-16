@@ -8,16 +8,14 @@ from threading import Lock
 import wave
 try:
     from harmonicSynth import HarmonicSynth, Harmonic
-except ImportError:
-    print('Missing module "harmonicSynth". Please download at')
-    print('https://github.com/Daniel-Chin/Python_Lib/blob/master/harmonicSynth.py')
-    input('Press Enter to quit...')
-try:
     from blindDescend import blindDescend
-except ImportError:
-    print('Missing module "blindDescend". Please download at')
-    print('https://github.com/Daniel-Chin/Python_Lib/blob/master/blindDescend.py')
+    from yin import yin
+except ImportError as e:
+    module_name = str(e).split('No module named ', 1)[1].strip().strip('"\'')
+    print(f'Missing module {module_name}. Please download at')
+    print(f'https://github.com/Daniel-Chin/Python_Lib/blob/master/{module_name}.py')
     input('Press Enter to quit...')
+    raise e
 
 PAGE_LEN = 512
 # PAGE_LEN = 1024
@@ -28,6 +26,8 @@ USE_HANN = True
 AUTOTUNE = True
 DO_SWIPE = False
 CROSSFADE_LEN = .3
+STRICT_HARMO = True
+
 WRITE_FILE = None
 # import random
 # WRITE_FILE = f'out_{random.randint(0, 999)}.wav'
@@ -123,19 +123,23 @@ def onAudioIn(in_data, sample_count, *_):
             return (None, pyaudio.paComplete)
 
         if sample_count > PAGE_LEN:
-            print('Discarding audio frame!')
+            print('Discarding audio page!')
             in_data = in_data[-PAGE_LEN:]
 
-        raw_frame = np.frombuffer(
+        raw_page = np.frombuffer(
             in_data, dtype = DTYPE[0]
         )
         if USE_HANN:
-            frame = HANN * raw_frame
+            page = HANN * raw_page
         else:
-            frame = raw_frame
-        energy = np.abs(rfft(frame))
+            page = raw_page
+        
+        # if STRICT_HARMO:
+        #     yin()
+        # else:
+        energy = np.abs(rfft(page))
         harmonics = [
-            Harmonic(*autotune(*refineGuess(x, frame))) for x, _ in 
+            Harmonic(*autotune(*refineGuess(x, page))) for x, _ in 
             zip(findPeaks(energy), range(N_HARMONICS))
         ]
         synth.eat(harmonics)
