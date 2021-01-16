@@ -10,6 +10,7 @@ try:
     from harmonicSynth import HarmonicSynth, Harmonic
     from blindDescend import blindDescend
     from yin import yin
+    from streamProfiler import StreamProfiler
 except ImportError as e:
     module_name = str(e).split('No module named ', 1)[1].strip().strip('"\'')
     print(f'Missing module {module_name}. Please download at')
@@ -62,6 +63,7 @@ streamOutContainer = []
 terminate_flag = 0
 terminateLock = Lock()
 synth = None
+profiler = StreamProfiler(PAGE_LEN / SR)
 
 def main():
     global terminate_flag, synth, f
@@ -125,6 +127,7 @@ def onAudioIn(in_data, sample_count, *_):
             print('Discarding audio page!')
             in_data = in_data[-PAGE_LEN:]
 
+        profiler.gonna('hann')
         raw_page = np.frombuffer(
             in_data, dtype = DTYPE[0]
         )
@@ -134,26 +137,34 @@ def onAudioIn(in_data, sample_count, *_):
             page = raw_page
         
         if STRICT_HARMO:
+            profiler.gonna('yin')
             f0 = yin(page, SR, PAGE_LEN)
             f0_ = autotune(f0, 0)[0]
+            profiler.gonna('sft')
             harmonics = [
                 Harmonic(f0_ * i, sft(page, f0 * i * PAGE_LEN / SR)) 
                 for i in range(1, 1 + N_HARMONICS)
             ]
         else:
+            profiler.gonna('fft')
             energy = np.abs(rfft(page))
+            profiler.gonna('sft')
             harmonics = [
                 Harmonic(*autotune(*refineGuess(x, page))) for x, _ in 
                 zip(findPeaks(energy), range(N_HARMONICS))
             ]
+        profiler.gonna('eat')
         synth.eat(harmonics)
 
+        profiler.gonna('mix')
         mixed = synth.mix()
         if WRITE_FILE is None:
             streamOutContainer[0].write(mixed, PAGE_LEN)
         else:
             f.writeframes(mixed)
 
+        profiler.display(same_line=True)
+        profiler.gonna('idle')
         return (None, pyaudio.paContinue)
     except:
         terminateLock.release()
