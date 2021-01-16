@@ -4,8 +4,8 @@ from harmonicSynth import Synth, Harmonic, TWO_PI
 from threading import Thread
 from time import sleep
 
-FRAME_LEN = 22100
-# FRAME_LEN = 2048*4
+# FRAME_LEN = 11050
+FRAME_LEN = 2048 * 2
 SR = 22100
 FRAME_TIME = FRAME_LEN / SR
 
@@ -14,7 +14,9 @@ DTYPE = (np.float32, pyaudio.paFloat32)
 def onAudioOut(_, sample_count, *__):
     s.eat(hs)
     signal = s.mix()
-    print(sample_count, signal.size)
+    if sample_count != signal.size:
+        print('Error 3498qfgj5', sample_count, signal.size)
+        return (None, pyaudio.paAbort)
     return (signal, pyaudio.paContinue)
 
 def main():
